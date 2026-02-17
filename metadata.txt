@@ -1,0 +1,28 @@
+[general]
+name=RETA - Robust Error-treatment Toolkit for Agriculture
+qgisMinimumVersion=3.0
+description=Spatial data filtering with sequential operational, global, and local outlier detection for agricultural sensor data.
+about=RETA (Robust Error-treatment Toolkit for Agriculture) provides a full pipeline
+    for spatial data cleaning: turn detection, overlap detection, speed/acceleration
+    filtering, AOI-based global outlier removal, local spatial outlier detection,
+    and cross-track correction.
+
+    RETA is adapted from and builds upon the methods described in Yield Editor 2.0:
+    Sudduth, K. A., Drummond, S. T., & Myers, D. B. (2012, July 29-August 1).
+    Yield Editor 2.0: Software for automated removal of yield map errors
+    [Paper presentation]. ASABE Annual International Meeting, Dallas, TX,
+    United States. https://doi.org/10.13031/2013.41893
+
+    Agentic coding AI was used to develop this tool with human guidance and oversight.
+
+    Dependencies: numpy, pandas, pyproj, scipy (optional, for convex hull area).
+version=0.1.0
+author=Zachary Komarnisky and Felippe Karp
+email=zachary.komarnisky@oldscollege.ca
+repository=https://github.com/felippehsk/RETA-QGIS
+tracker=https://github.com/felippehsk/RETA-QGIS/issues
+tags=vector,point,filtering,outlier,spatial,cleaning,agriculture
+category=Analysis
+icon=icon.png
+experimental=True
+hasProcessingProvider=True
