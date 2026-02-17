@@ -209,7 +209,7 @@ Global value bounds are computed using the adjusted boxplot for skewed distribut
 
 **Medcouple** (robust measure of skewness, breakdown value = 25%):
 
-$$\mathrm{MC}(X) = \operatorname{med}_{x_i \leq m_X \leq x_j}\; h(x_i, x_j)$$
+$$\mathrm{MC}(X) = \underset{x_i \leq m_X \leq x_j}{\mathrm{med}}\; h(x_i, x_j)$$
 
 where:
 
