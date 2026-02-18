@@ -949,6 +949,7 @@ class SpatialDataFilteringAlgorithm(QgsProcessingAlgorithm):
     FILTER_SPEED = 'FILTER_SPEED'
     FILTER_ACCEL = 'FILTER_ACCEL'
     FILTER_DIST_JUMP = 'FILTER_DIST_JUMP'
+    SPEED_SMOOTH_FACTOR = 'SPEED_SMOOTH_FACTOR'
     REMOVE_FLAGGED = 'REMOVE_FLAGGED'
 
     OUTPUT = 'OUTPUT' 
@@ -1017,6 +1018,17 @@ class SpatialDataFilteringAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterBoolean(self.FILTER_SPEED, 'Filter Speed Limits', defaultValue=True))
         self.addParameter(QgsProcessingParameterBoolean(self.FILTER_ACCEL, 'Filter High Acceleration', defaultValue=True))
         self.addParameter(QgsProcessingParameterBoolean(self.FILTER_DIST_JUMP, 'Filter Distance Jumps', defaultValue=True))
+
+        p_smv = QgsProcessingParameterNumber(
+            self.SPEED_SMOOTH_FACTOR,
+            'Smooth Velocity Factor (0 = disabled; flag if |v_i - v_{i-1}| / v_i exceeds this)',
+            type=QgsProcessingParameterNumber.Double,
+            defaultValue=0.0,
+            minValue=0.0,
+            optional=True
+        )
+        p_smv.setFlags(p_smv.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        self.addParameter(p_smv)
         
         self.addParameter(QgsProcessingParameterBoolean(self.USE_CROSS_TRACK, 'Flag stripy transects (Cross-Track)', defaultValue=True))
         self.addParameter(QgsProcessingParameterBoolean(self.USE_CROSS_TRACK_CORRECT, 'Correct stripy transects (write corrected variable)', defaultValue=False))
@@ -1166,7 +1178,8 @@ class SpatialDataFilteringAlgorithm(QgsProcessingAlgorithm):
             'filter_overlap': self.parameterAsBool(parameters, self.FILTER_OVERLAP, context),
             'filter_speed': self.parameterAsBool(parameters, self.FILTER_SPEED, context),
             'filter_accel': self.parameterAsBool(parameters, self.FILTER_ACCEL, context),
-            'filter_dist_jump': self.parameterAsBool(parameters, self.FILTER_DIST_JUMP, context)
+            'filter_dist_jump': self.parameterAsBool(parameters, self.FILTER_DIST_JUMP, context),
+            'speed_smooth_factor': self.parameterAsDouble(parameters, self.SPEED_SMOOTH_FACTOR, context)
         }
         
         # Report Swath info

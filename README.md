@@ -27,14 +27,25 @@ Agentic coding AI was used to develop this tool with human guidance and oversigh
 
 ## Installation
 
-1. Download or clone this repository.
+### Recommended: Install from ZIP (QGIS built-in)
+
+1. Go to the [Releases page](https://github.com/felippehsk/RETA-QGIS/releases) and download the latest `reta_qgis_vX.X.X.zip` file.
+2. In QGIS, open **Plugins → Manage and Install Plugins → Install from ZIP**.
+3. Select the downloaded ZIP file and click **Install Plugin**.
+4. Enable the plugin in the **Installed** tab if it is not already enabled.
+
+> **Note:** RETA is a Processing plugin. It does not add a toolbar button or menu entry. After enabling the plugin, find it in the **Processing Toolbox** panel (**Processing → Toolbox** or `Ctrl+Alt+T`) under **RETA → Spatial Data Filtering**.
+
+### Alternative: Manual Installation
+
+If you prefer to install from source:
+
+1. Clone or download this repository.
 2. Copy the **`reta_qgis`** folder (not the entire repo) into your QGIS plugins directory:
-   - **Windows:** `%APPDATA%/QGIS/QGIS3/profiles/default/python/plugins/`
+   - **Windows:** `%APPDATA%\QGIS\QGIS3\profiles\default\python\plugins\`
    - **Linux:** `~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/`
    - **macOS:** `~/Library/Application Support/QGIS/QGIS3/profiles/default/python/plugins/`
-3. Restart QGIS and enable the plugin in **Plugins > Manage and Install Plugins**.
-
-> **Note:** RETA is a Processing plugin. It does not add a toolbar button or menu entry. After enabling the plugin, find it in the **Processing Toolbox** panel (**Processing > Toolbox** or `Ctrl+Alt+T`) under **RETA > Spatial Data Filtering**.
+3. Restart QGIS and enable the plugin in **Plugins → Manage and Install Plugins**.
 
 ### Dependencies
 
@@ -93,7 +104,7 @@ Each point receives a bitmask `error_flag` that encodes exactly which filters fl
 | `Clean` | 0 | -- | No errors detected |
 | `Op: Turn` | 1 | Operational | Point is in a turn/headland maneuver |
 | `Op: Short Segment` | 2 | Operational | Point is in a segment shorter than minimum length |
-| `Op: Distance Jump` | 4 | Operational | Distance to previous point exceeds 5x the median |
+| `Op: Distance Jump` | 4 | Operational | Distance to previous point exceeds 5× the median inter-point distance |
 | `Op: Start Delay` | 16 | Operational | Sensor ramp-up at pass start |
 | `Op: End Delay` | 32 | Operational | Sensor ramp-down at pass end |
 | `Op: Overlap` | 64 | Operational | Overlapping with a previous pass |
@@ -120,7 +131,7 @@ $$d_i = \sqrt{(\Delta x_i)^2 + (\Delta y_i)^2}$$
 
 **Bearing** (compass convention, clockwise from north):
 
-$$\theta_i = \left(90° - \arctan2(\Delta y_i,\, \Delta x_i) \cdot \frac{180}{\pi}\right) \bmod 360$$
+$$\theta_i = \left(90° - \arctan2(\Delta y_i,\, \Delta x_i) \cdot \frac{180°}{\pi}\right) \bmod 360°$$
 
 **Speed** and **acceleration** (when timestamps are available):
 
@@ -130,11 +141,11 @@ $$v_i = \frac{d_i}{\Delta t_i} \qquad a_i = \frac{|v_i - v_{i-1}|}{\Delta t_i}$$
 
 Bearing is smoothed with a centered rolling vector average (window = 3). Segments are split where the smoothed bearing change exceeds a threshold or the inter-point distance exceeds 20 m. Segments are classified as:
 
-- **Valid pass**: cumulative length >= `min_len_m` (default 30 m)
+- **Valid pass**: cumulative length ≥ `min_len_m` (default 30 m)
 - **Short segment**: length between 5 m and `min_len_m`
 - **Turn**: length < 5 m or sharp bearing change
 
-**Smart Turn Detection** refines boundaries by correlating the exit bearing of pass *i* with the entry bearing of pass *i+1*. If the angular difference exceeds 135 deg (approximate U-turn), the gap is marked as a turn and boundary points showing curvature (> 10 deg deviation from the pass median bearing) are absorbed into the turn zone.
+**Smart Turn Detection** refines boundaries by correlating the exit bearing of pass *i* with the entry bearing of pass *i*+1. If the angular difference exceeds 135° (approximate U-turn), the gap is marked as a turn and boundary points showing curvature (> 10° deviation from the pass median bearing) are absorbed into the turn zone.
 
 ---
 
@@ -146,7 +157,7 @@ Points identified as turns or short segments during transect identification are 
 
 #### 1.2 Overlap Detection (Grid Occupancy)
 
-A hash-map of 1 m grid cells tracks which transect first occupied each cell. For each point, a band of cells perpendicular to the travel direction (at fractions of the swath width) is checked. If any cell was previously occupied by a different transect, the point is flagged as overlap.
+A hash-map of 1 m grid cells tracks which transect first occupied each cell. For each point, a band of cells perpendicular to the travel direction (at ±0.25 and ±0.5 swath-width fractions) is checked. If any cell was previously occupied by a different transect, the point is flagged as overlap.
 
 Isolated overlap flags (runs shorter than 5 consecutive points) are removed as speckle noise.
 
@@ -158,41 +169,49 @@ Isolated overlap flags (runs shorter than 5 consecutive points) are removed as s
 
 Points where platform speed falls outside acceptable bounds are flagged:
 
-$$\text{Flag if: } v_i < v_{\min} \quad \text{or} \quad v_i > v_{\max}$$
+$$\text{Flag if } v_i < v_{\min} \quad \text{or} \quad v_i > v_{\max}$$
 
-In auto-detect mode, bounds are derived from the 5th and 99th percentiles of the speed distribution with a 20% buffer.
+In auto-detect mode, bounds are derived from the 5th and 99th percentiles of the speed distribution with a 20% buffer:
+
+$$v_{\min} = \max\!\left(0.1,\; P_{5} \times 0.8\right) \qquad v_{\max} = \min\!\left(30.0,\; P_{99} \times 1.2\right)$$
 
 *This is particularly important for yield data, where speed approaching zero causes computed yield values to become artificially inflated (mass flow / speed). Adapted from the MINV and MAXV filters in Yield Editor (Sudduth & Drummond, 2007).*
 
 #### 1.4 High Acceleration
 
-Points with acceleration exceeding 1.5 m/s^2 are flagged, indicating abrupt changes in platform motion that may compromise sensor readings.
+Points with acceleration exceeding 1.5 m s⁻² are flagged, indicating abrupt changes in platform motion that may compromise sensor readings.
 
 #### 1.5 Distance Jumps
 
 Points where the inter-point distance exceeds 5 times the dataset median distance are flagged, indicating GPS jumps or data gaps:
 
-$$\text{Flag if: } d_i > 5 \cdot \tilde{d}$$
+$$\text{Flag if } d_i > 5 \cdot \tilde{d}$$
 
 where $\tilde{d}$ is the median inter-point distance.
 
 #### 1.6 Smooth Velocity Change
 
-Adapted from the Yield Editor SMV (Smooth Velocity) filter. Flags points where the relative speed change between consecutive readings exceeds a user-specified factor:
+Adapted from the Yield Editor SMV (Smooth Velocity) filter. Flags points where the relative speed change between consecutive readings exceeds a user-specified factor $f_{\text{smooth}}$:
 
-$$\text{Flag if: } \frac{|v_i - v_{i-1}|}{v_i} > f_{\text{smooth}}$$
+$$\text{Flag if } \frac{|v_i - v_{i-1}|}{v_i} > f_{\text{smooth}}$$
+
+Set via the **Smooth Velocity Factor** advanced parameter. A value of 0 (default) disables the filter. Typical values are 0.5–1.0, corresponding to flagging points where speed changes by more than 50–100% relative to the current reading.
 
 *Reference: Sudduth & Drummond (2007), SMV filter.*
 
 #### 1.7 Start/End Delay
 
-**Applicable primarily to yield monitors and other sensors with measurement lag.** Detects ramp-up (filling) and ramp-down (emptying) patterns at pass boundaries. For each transect, the first and last 20 points are scanned. Points below 70% of the transect median value are flagged:
+**Applicable primarily to yield monitors and other sensors with measurement lag.** Detects ramp-up (filling) and ramp-down (emptying) patterns at pass boundaries. For each transect, the first and last 20 points are scanned. Points below 70% of the transect median are flagged:
 
 $$\tau_t = 0.70 \cdot \tilde{x}_t$$
 
-$$\text{Flag start points } i \text{ where } x_i < \tau_t \text{ before the first } x_i \geq \tau_t$$
+$$\text{Flag start points } i \text{ where } x_i < \tau_t \text{, up to the first } x_i \geq \tau_t$$
 
-Auto-detection samples 30 transects and enables the filter if >50% show a ramp-up signature (mean of first 5 points < 1.2x mean of next 5 points).
+**Start delay** uses auto-detection: up to 30 transects are sampled and the filter is enabled only if more than 50% show a ramp-up signature, defined as the mean of points 6–10 exceeding 1.2× the mean of the first 5 points:
+
+$$\frac{1}{5}\sum_{i=6}^{10} x_i \;>\; 1.2 \cdot \frac{1}{5}\sum_{i=1}^{5} x_i$$
+
+**End delay** does not use auto-detection; it is applied directly whenever the *Auto-Detect End Delays* checkbox is enabled.
 
 *References:*
 > Blackmore, S. (1999). Remedial correction of yield map data. *Precision Agriculture*, *1*(1), 53--66. https://doi.org/10.1023/A:1009969601387
@@ -207,25 +226,27 @@ Auto-detection samples 30 transects and enables the filter if >50% show a ramp-u
 
 Global value bounds are computed using the adjusted boxplot for skewed distributions. Unlike the classical boxplot, which assumes symmetry and can flag >8% of valid observations in skewed data, the adjusted boxplot uses the **medcouple** (MC) to asymmetrically extend the fences.
 
-**Medcouple** (robust measure of skewness, breakdown value = 25%):
+**Medcouple** (robust measure of skewness, breakdown point = 25%):
 
-$$\mathrm{MC}(X) = \underset{x_i \leq m_X \leq x_j}{\mathrm{med}}\; h(x_i, x_j)$$
+$$\mathrm{MC}(X) = \underset{x_i \leq \tilde{x} \leq x_j}{\mathrm{med}}\; h(x_i, x_j)$$
 
-where:
+where $\tilde{x}$ is the sample median of $X$ and the kernel function is:
 
-$$h(x_i, x_j) = \frac{(x_j - m_X) + (x_i - m_X)}{x_j - x_i}$$
+$$h(x_i, x_j) = \frac{(x_j - \tilde{x}) - (\tilde{x} - x_i)}{x_j - x_i}$$
 
 **Adjusted fences:**
 
-For MC >= 0 (right-skewed or symmetric):
+For $\mathrm{MC} \geq 0$ (right-skewed or symmetric):
 
-$$\text{Lower} = Q_1 - k \cdot e^{-4 \cdot \mathrm{MC}} \cdot \mathrm{IQR} \qquad \text{Upper} = Q_3 + k \cdot e^{3 \cdot \mathrm{MC}} \cdot \mathrm{IQR}$$
+$$L = Q_1 - k \cdot e^{-4\,\mathrm{MC}} \cdot \mathrm{IQR} \qquad U = Q_3 + k \cdot e^{3\,\mathrm{MC}} \cdot \mathrm{IQR}$$
 
-For MC < 0 (left-skewed):
+For $\mathrm{MC} < 0$ (left-skewed):
 
-$$\text{Lower} = Q_1 - k \cdot e^{-3 \cdot \mathrm{MC}} \cdot \mathrm{IQR} \qquad \text{Upper} = Q_3 + k \cdot e^{4 \cdot \mathrm{MC}} \cdot \mathrm{IQR}$$
+$$L = Q_1 - k \cdot e^{-3\,\mathrm{MC}} \cdot \mathrm{IQR} \qquad U = Q_3 + k \cdot e^{4\,\mathrm{MC}} \cdot \mathrm{IQR}$$
 
-where $k = 1.5$ (default) and $\mathrm{IQR} = Q_3 - Q_1$. An optional user-adjustable margin widens the bounds further.
+where $k = 1.5$ (default) and $\mathrm{IQR} = Q_3 - Q_1$. An optional user-adjustable margin widens the bounds by a fraction $m$ of the fence value:
+
+$$L' = L\,(1 - m) \qquad U' = U\,(1 + m)$$
 
 *References:*
 > Hubert, M., & Vandervieren, E. (2008). An adjusted boxplot for skewed distributions. *Computational Statistics & Data Analysis*, *52*(12), 5186--5201. https://doi.org/10.1016/j.csda.2007.11.008
@@ -238,9 +259,9 @@ where $k = 1.5$ (default) and $\mathrm{IQR} = Q_3 - Q_1$. An optional user-adjus
 
 #### 3.1 Grid-Based Local Standard Deviation
 
-Points are assigned to grid cells sized as a multiple of the inferred swath width (default: 3x swath). Cell-level mean and standard deviation are computed from **currently clean data only** (points that passed Phases 1 and 2). A point is flagged if it deviates more than *n* standard deviations from its cell mean:
+Points are assigned to grid cells sized as a multiple of the inferred swath width (default: 3× swath). Cell-level mean and standard deviation are computed from **currently clean data only** (points that passed Phases 1 and 2). A point is flagged if it deviates more than $n$ standard deviations from its cell mean:
 
-$$\text{Flag if: } |x_p - \bar{x}_C| > n \cdot s_C$$
+$$\text{Flag if } |x_p - \bar{x}_C| > n \cdot s_C$$
 
 where $\bar{x}_C$ and $s_C$ are the mean and standard deviation of clean points in cell $C$, and $n$ is the sigma multiplier (default 3.0).
 
@@ -255,11 +276,11 @@ where $\bar{x}_C$ and $s_C$ are the mean and standard deviation of clean points 
 
 $$r_t = \frac{\tilde{x}_t}{\tilde{x}_t^{(\mathrm{roll})}}$$
 
-$$\text{Flag if: } r_t > 1.5 \quad \text{or} \quad r_t < 0.66$$
+$$\text{Flag if } r_t > 1.5 \quad \text{or} \quad r_t < 0.66$$
 
 Optional correction scales each transect's values by the inverse ratio:
 
-$$x_i^{(\mathrm{corrected})} = x_i \cdot \frac{\tilde{x}_t^{(\mathrm{roll})}}{\tilde{x}_t}$$
+$$x_i^{(\mathrm{corr})} = x_i \cdot \frac{\tilde{x}_t^{(\mathrm{roll})}}{\tilde{x}_t}$$
 
 *References:*
 > Sudduth, K. A., & Drummond, S. T. (2007). Yield Editor: Software for removing errors from crop yield maps. *Agronomy Journal*, *99*(6), 1471--1482. https://doi.org/10.2134/agronj2006.0326
@@ -273,8 +294,10 @@ $$x_i^{(\mathrm{corrected})} = x_i \cdot \frac{\tilde{x}_t^{(\mathrm{roll})}}{\t
 Swath width is used to scale grid cells for overlap detection and local filtering. RETA infers it in priority order:
 
 1. From a `swath_width` or `Width` column in the data (if present)
-2. From the ratio of convex hull area to total travel distance: $w = A_{\text{hull}} / D_{\text{total}}$
+2. From the ratio of field area to total travel distance: $\hat{w} = A / D_{\text{total}}$, where $A$ is the convex hull area of the point cloud (or bounding-box area when scipy is unavailable)
 3. Fallback: 10 m
+
+In all cases, an inferred value is only accepted if it falls within the plausible range of 2–40 m. Values outside this range are rejected and the next method in the priority list is tried.
 
 ---
 
@@ -286,10 +309,10 @@ The output layer includes all original fields plus:
 
 | Field | Type | Description |
 |---|---|---|
-| `dist_m` | Double | Distance to previous point (meters) |
-| `bearing_deg` | Double | Travel bearing (degrees, clockwise from north) |
-| `speed_mps` | Double | Speed (meters per second) |
-| `transect_id` | Integer | Pass/transect identifier (-1 = turn/short) |
+| `dist_m` | Double | Distance to previous point (m) |
+| `bearing_deg` | Double | Travel bearing (°, clockwise from north) |
+| `speed_mps` | Double | Speed (m s⁻¹) |
+| `transect_id` | Integer | Pass/transect identifier (−1 = turn/short) |
 | `is_turn` | Boolean | True if point is in a turn zone |
 | `is_short` | Boolean | True if point is in a short segment |
 | `error_flag` | Integer | Bitmask encoding all triggered filters |
