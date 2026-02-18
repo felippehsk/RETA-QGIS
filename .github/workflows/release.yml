@@ -1,0 +1,30 @@
+name: Release Plugin ZIP
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Build plugin ZIP
+        run: |
+          zip -r reta_qgis_${{ steps.version.outputs.VERSION }}.zip reta_qgis/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: reta_qgis_${{ steps.version.outputs.VERSION }}.zip
+          generate_release_notes: true
