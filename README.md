@@ -121,6 +121,22 @@ Each point receives a bitmask `error_flag` that encodes exactly which filters fl
 
 ## Filter Details and Equations
 
+### Pre-processing: Column Detection
+
+Before computing any derived quantities, RETA scans the input dataset for pre-existing columns to avoid redundant calculation. Speed columns are detected by name (case-insensitive) using a priority-ordered lookup:
+
+| Priority | Example column names | Assumed unit |
+|---|---|---|
+| 1 | `speed_mps`, `vel_mps`, `velocity_mps` | m s⁻¹ |
+| 2 | `speed_kmh`, `speed_kph`, `speed_km_h` | km h⁻¹ |
+| 3 | `speed_mph` | mph |
+| 4 | `speed_kn`, `speed_kt` | knots |
+| 5 | `speed`, `velocity`, `groundspeed`, `harvest_speed`, … | auto-detected from value range |
+
+For ambiguous names (group 5), the median value is used to infer the unit: ≤ 15 → m s⁻¹, 15–120 → km h⁻¹, > 120 → mph. Columns whose values are all zero or null are skipped and treated as if they do not exist.
+
+An explicit **Speed column** parameter (advanced) lets users override auto-detection and directly name the column that contains speed. Even when set explicitly, the zero-guard applies: if the selected column produces all-zero values after unit conversion, it is rejected and speed is computed from geometry instead.
+
 ### Pre-processing: Geometry Calculation
 
 Coordinates are projected to a local metric system (UTM via pyproj when available, or approximate degree-to-meter scaling as fallback). All subsequent distance and area calculations use these projected coordinates.
@@ -212,6 +228,8 @@ $$\text{Flag start points } i \text{ where } x_i < \tau_t \text{, up to the firs
 $$\frac{1}{5}\sum_{i=6}^{10} x_i \;>\; 1.2 \cdot \frac{1}{5}\sum_{i=1}^{5} x_i$$
 
 **End delay** does not use auto-detection; it is applied directly whenever the *Auto-Detect End Delays* checkbox is enabled.
+
+**Manual override (advanced):** The *Manual start delay* and *Manual end delay* parameters accept a fixed point count (e.g., 5). When set to a value > 0, the specified number of points are always removed from the start or end of every transect, bypassing the threshold-based detection entirely. This is useful when the sensor lag is known and consistent across passes.
 
 *References:*
 > Blackmore, S. (1999). Remedial correction of yield map data. *Precision Agriculture*, *1*(1), 53--66. https://doi.org/10.1023/A:1009969601387

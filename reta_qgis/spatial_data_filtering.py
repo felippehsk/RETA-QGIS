@@ -127,12 +127,22 @@ class DataCleaner:
         self.df['bearing_deg'] = self.df['bearing_deg'].fillna(0)
         self.df['dist_m'] = self.df['dist_m'].fillna(0)
         
+        # --- Detect and normalize any pre-existing speed column ---
+        speed_col, speed_factor = self._detect_speed_column()
+        if speed_col is not None and speed_col != 'speed_mps':
+            self.df['speed_mps'] = (
+                pd.to_numeric(self.df[speed_col], errors='coerce') * speed_factor
+            ).fillna(0)
+            self.log(f"  [Geometry] Pre-populated speed_mps from '{speed_col}' (×{speed_factor:.5f}).")
+
         time_col = None
-        for col in ['time', 'seconds', 'duration', 'gps_time', 'timestamp', 'datetime', 'DateTime', 'Time', 'gps_sec', 'GPS_Time']:
+        for col in ['time', 'seconds', 'duration', 'gps_time', 'timestamp', 'datetime',
+                    'DateTime', 'Time', 'gps_sec', 'GPS_Time', 'gpstime', 'utc_time',
+                    'epoch', 'posix_time', 'time_s', 'time_sec']:
             if col in self.df.columns:
                 time_col = col
                 break
-        
+
         if time_col:
             # Standardize time to float seconds
             if not np.issubdtype(self.df[time_col].dtype, np.number):
@@ -146,25 +156,74 @@ class DataCleaner:
 
             self.df['time_diff'] = self.df[time_col].diff().fillna(0).abs()
             safe_time = self.df['time_diff'].replace(0, np.nan)
-            
-            # Excellence: Only calculate if not already provided or if currently all zeros
+
             if 'speed_mps' not in self.df.columns or (self.df['speed_mps'] == 0).all():
                 self.log("  [Geometry] Calculating speed from distance and time delta.")
                 self.df['speed_mps'] = (self.df['dist_m'] / safe_time).fillna(0)
             else:
                 self.log("  [Geometry] Keeping existing speed_mps column.")
-            
+
             if 'accel_mps2' not in self.df.columns or (self.df['accel_mps2'] == 0).all():
                 self.log("  [Geometry] Calculating acceleration from speed delta.")
                 self.df['accel_mps2'] = (self.df['speed_mps'].diff().abs() / safe_time).fillna(0)
             else:
                 self.log("  [Geometry] Keeping existing accel_mps2 column.")
         else:
-            self.log("  [Geometry] Warning: No time stamps found. Distance-based fallbacks used.")
+            self.log("  [Geometry] Warning: No timestamp column found. Distance-based fallbacks used.")
             if 'speed_mps' not in self.df.columns or (self.df['speed_mps'] == 0).all():
-                self.df['speed_mps'] = self.df['dist_m'] 
+                self.df['speed_mps'] = self.df['dist_m']
             if 'accel_mps2' not in self.df.columns or (self.df['accel_mps2'] == 0).all():
                 self.df['accel_mps2'] = self.df['dist_m'].diff().abs().fillna(0)
+
+    def _detect_speed_column(self):
+        """
+        Search df columns for a pre-existing speed field by common names.
+        Returns (col_name, factor_to_mps) or (None, 1.0).
+        Skips columns whose values are all-zero or all-null.
+        For ambiguous names (no unit suffix), infers unit from the value range.
+        """
+        # Build a case-insensitive lookup: lowercase -> actual column name
+        col_map = {c.lower(): c for c in self.df.columns}
+
+        # (list_of_lowercase_names, factor_to_mps)  None = auto-detect from range
+        candidates = [
+            (['speed_mps', 'spd_mps', 'vel_mps', 'velocity_mps', 'speed_ms', 'spd_ms'], 1.0),
+            (['speed_kmh', 'speed_kph', 'spd_kmh', 'spd_kph', 'speed_km_h',
+              'velocity_kmh', 'vel_kmh', 'speed_km/h'], 1.0 / 3.6),
+            (['speed_mph', 'spd_mph', 'velocity_mph', 'vel_mph'], 1.0 / 2.23694),
+            (['speed_kn', 'speed_kt', 'groundspeed_kt', 'spd_kt'], 1.0 / 1.94384),
+            (['speed', 'spd', 'velocity', 'vel',
+              'groundspeed', 'ground_speed', 'gps_speed', 'gpsspeed',
+              'harvest_speed', 'harvestspeed', 'machine_speed', 'machinespeed',
+              'fieldspeed', 'field_speed'], None),
+        ]
+
+        for name_list, factor in candidates:
+            for name_lower in name_list:
+                actual_col = col_map.get(name_lower)
+                if actual_col is None:
+                    continue
+                vals = pd.to_numeric(self.df[actual_col], errors='coerce').dropna()
+                if len(vals) == 0 or (vals == 0).all():
+                    self.log(f"  [Speed] Column '{actual_col}' found but all values are zero/null — skipping.")
+                    continue
+                if factor is None:
+                    # Infer unit from median value
+                    median_val = vals.median()
+                    if median_val <= 15.0:
+                        factor = 1.0
+                        self.log(f"  [Speed] '{actual_col}' median={median_val:.2f}: assumed m/s.")
+                    elif median_val <= 120.0:
+                        factor = 1.0 / 3.6
+                        self.log(f"  [Speed] '{actual_col}' median={median_val:.2f}: assumed km/h.")
+                    else:
+                        factor = 1.0 / 2.23694
+                        self.log(f"  [Speed] '{actual_col}' median={median_val:.2f}: assumed mph.")
+                else:
+                    self.log(f"  [Speed] Found '{actual_col}' → {vals.median() * factor:.3f} m/s median.")
+                return actual_col, factor
+
+        return None, 1.0
 
     def identify_transects_v7(self, turn_threshold=45, min_len_m=30):
         self.log(f"  [Transects] Segmenting passes (turn_thresh: {turn_threshold}°, min_len: {min_len_m}m)...")
@@ -552,9 +611,18 @@ class DataCleaner:
         # 1.6 Delays
         auto_start = filters.get('auto_start_delay', False)
         auto_end = filters.get('auto_end_delay', False)
-        if (auto_start or auto_end) and var_col in self.df.columns:
-            self.log(f"  [Op] Analyzing yield delays for '{var_col}'...")
-            self.apply_per_transect_delay(var_col, enable_start=auto_start, enable_end=auto_end)
+        manual_start = int(filters.get('manual_start_points', 0))
+        manual_end = int(filters.get('manual_end_points', 0))
+        if (auto_start or auto_end or manual_start > 0 or manual_end > 0) and var_col in self.df.columns:
+            self.log(f"  [Op] Analyzing delays for '{var_col}' "
+                     f"(manual_start={manual_start}, manual_end={manual_end})...")
+            self.apply_per_transect_delay(
+                var_col,
+                enable_start=auto_start,
+                enable_end=auto_end,
+                manual_start_points=manual_start,
+                manual_end_points=manual_end,
+            )
 
         op_mask_val = 1 | 2 | 4 | 8 | 16 | 32 | 64 | 1024 | 2048 | 8192 | 16384
         if self.verbose:
@@ -815,29 +883,38 @@ class DataCleaner:
                 self.df[var_col].astype(float) * self.df['transect_id'].map(factors).fillna(1.0)
             )
 
-    def apply_per_transect_delay(self, var_col, enable_start=True, enable_end=True):
-         if 'transect_id' not in self.df.columns: return
-         
-         valid_tids = self.df[self.df['transect_id'] > 0]['transect_id'].unique()
-         start_indices = []
-         end_indices = []
-         
-         for tid in valid_tids:
+    def apply_per_transect_delay(self, var_col, enable_start=True, enable_end=True,
+                                  manual_start_points=0, manual_end_points=0):
+        if 'transect_id' not in self.df.columns:
+            return
+
+        valid_tids = self.df[self.df['transect_id'] > 0]['transect_id'].unique()
+        start_indices = []
+        end_indices = []
+
+        for tid in valid_tids:
             rows = self.df[self.df['transect_id'] == tid]
-            if len(rows) < 5: continue
-            
-            # Use median of the transect (robust to outliers, but ideally should use Clean data?)
-            # If we haven't filtered Global yet, we might have outliers.
-            # But delay depends on ramp. Robust median is usually fine.
-            median_val = rows[var_col].median()
-            if median_val <= 0: continue
-            
-            thresh = 0.70 * median_val 
-            vals = rows[var_col].values
+            if len(rows) < 1:
+                continue
             indices = rows.index.values
-            
-            if enable_start:
-                limit = min(len(vals), 20) 
+
+            # Pre-compute threshold once (only needed for auto-detection paths)
+            thresh = None
+            vals = None
+            need_auto = (enable_start and manual_start_points == 0) or \
+                        (enable_end and manual_end_points == 0)
+            if need_auto and len(rows) >= 5 and var_col in rows.columns:
+                median_val = rows[var_col].median()
+                if median_val > 0:
+                    thresh = 0.70 * median_val
+                    vals = rows[var_col].values
+
+            # --- Start delay ---
+            if manual_start_points > 0:
+                n = min(manual_start_points, len(indices))
+                start_indices.extend(indices[:n])
+            elif enable_start and thresh is not None and vals is not None:
+                limit = min(len(vals), 20)
                 cut = 0
                 for i in range(limit):
                     if vals[i] >= thresh:
@@ -845,8 +922,12 @@ class DataCleaner:
                         break
                 if cut > 0:
                     start_indices.extend(indices[:cut])
-                    
-            if enable_end:
+
+            # --- End delay ---
+            if manual_end_points > 0:
+                n = min(manual_end_points, len(indices))
+                end_indices.extend(indices[-n:])
+            elif enable_end and thresh is not None and vals is not None:
                 limit = min(len(vals), 20)
                 cut = 0
                 N = len(vals)
@@ -856,10 +937,10 @@ class DataCleaner:
                         break
                 if cut > 0:
                     end_indices.extend(indices[N - cut:])
-                    
-         if start_indices:
+
+        if start_indices:
             self.df.loc[start_indices, 'error_flag'] |= self.error_masks['Op: Start Delay']
-         if end_indices:
+        if end_indices:
             self.df.loc[end_indices, 'error_flag'] |= self.error_masks['Op: End Delay']
 
     def infer_delay_parameters(self, var_col):
@@ -950,6 +1031,9 @@ class SpatialDataFilteringAlgorithm(QgsProcessingAlgorithm):
     FILTER_ACCEL = 'FILTER_ACCEL'
     FILTER_DIST_JUMP = 'FILTER_DIST_JUMP'
     SPEED_SMOOTH_FACTOR = 'SPEED_SMOOTH_FACTOR'
+    SPEED_FIELD = 'SPEED_FIELD'
+    MANUAL_START_POINTS = 'MANUAL_START_POINTS'
+    MANUAL_END_POINTS = 'MANUAL_END_POINTS'
     REMOVE_FLAGGED = 'REMOVE_FLAGGED'
 
     OUTPUT = 'OUTPUT' 
@@ -984,7 +1068,18 @@ class SpatialDataFilteringAlgorithm(QgsProcessingAlgorithm):
 
         # --- MANUAL OVERRIDES (ADVANCED) ---
         # Note: We use FlagAdvanced (1) to hide them by default
-        
+
+        # 0. Explicit speed column override
+        p_speed_col = QgsProcessingParameterField(
+            self.SPEED_FIELD,
+            'Speed column (leave unset to auto-detect from field names)',
+            parentLayerParameterName=self.INPUT_LAYER,
+            type=QgsProcessingParameterField.Numeric,
+            optional=True
+        )
+        p_speed_col.setFlags(p_speed_col.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        self.addParameter(p_speed_col)
+
         # 1. Speed
         p_min_s = QgsProcessingParameterNumber(self.MIN_SPEED, 'Min Speed (m/s) [Ignored if Auto-Speed True]', type=QgsProcessingParameterNumber.Double, defaultValue=0.2)
         p_min_s.setFlags(p_min_s.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
@@ -1018,6 +1113,29 @@ class SpatialDataFilteringAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterBoolean(self.FILTER_SPEED, 'Filter Speed Limits', defaultValue=True))
         self.addParameter(QgsProcessingParameterBoolean(self.FILTER_ACCEL, 'Filter High Acceleration', defaultValue=True))
         self.addParameter(QgsProcessingParameterBoolean(self.FILTER_DIST_JUMP, 'Filter Distance Jumps', defaultValue=True))
+
+        # Manual start/end delay point counts
+        p_ms = QgsProcessingParameterNumber(
+            self.MANUAL_START_POINTS,
+            'Manual start delay — points to remove per pass (0 = use auto-detect)',
+            type=QgsProcessingParameterNumber.Integer,
+            defaultValue=0,
+            minValue=0,
+            optional=True
+        )
+        p_ms.setFlags(p_ms.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        self.addParameter(p_ms)
+
+        p_me = QgsProcessingParameterNumber(
+            self.MANUAL_END_POINTS,
+            'Manual end delay — points to remove per pass (0 = use auto-detect)',
+            type=QgsProcessingParameterNumber.Integer,
+            defaultValue=0,
+            minValue=0,
+            optional=True
+        )
+        p_me.setFlags(p_me.flags() | QgsProcessingParameterDefinition.FlagAdvanced)
+        self.addParameter(p_me)
 
         p_smv = QgsProcessingParameterNumber(
             self.SPEED_SMOOTH_FACTOR,
@@ -1058,6 +1176,40 @@ class SpatialDataFilteringAlgorithm(QgsProcessingAlgorithm):
         if not features:
             return {self.OUTPUT: None}
         df = pd.DataFrame(features)
+
+        # --- Explicit speed column override ---
+        speed_field_param = self.parameterAsString(parameters, self.SPEED_FIELD, context)
+        if speed_field_param and speed_field_param in df.columns:
+            col_lower = speed_field_param.lower()
+            if any(x in col_lower for x in ['kmh', 'kph', 'km_h', 'km/h']):
+                factor, unit_label = 1.0 / 3.6, 'km/h'
+            elif 'mph' in col_lower:
+                factor, unit_label = 1.0 / 2.23694, 'mph'
+            elif any(x in col_lower for x in ['_kn', '_kt', 'knot']):
+                factor, unit_label = 1.0 / 1.94384, 'knots'
+            else:
+                vals_check = pd.to_numeric(df[speed_field_param], errors='coerce').dropna()
+                if len(vals_check) > 0 and vals_check.median() > 15:
+                    factor, unit_label = 1.0 / 3.6, 'km/h (auto-detected)'
+                else:
+                    factor, unit_label = 1.0, 'm/s (assumed)'
+
+            converted = pd.to_numeric(df[speed_field_param], errors='coerce') * factor
+            valid_converted = converted.dropna()
+
+            # Zero-guard: reject the column if it produces all-zero or near-zero speeds
+            if len(valid_converted) == 0 or (valid_converted == 0).all() or valid_converted.max() < 0.01:
+                feedback.pushWarning(
+                    f"[Speed] Column '{speed_field_param}' produces all-zero or near-zero values "
+                    f"after unit conversion ({unit_label}) — ignoring, will compute from geometry."
+                )
+            else:
+                df['speed_mps'] = converted.fillna(0)
+                feedback.pushInfo(
+                    f"[Speed] Using '{speed_field_param}' ({unit_label}); "
+                    f"median={valid_converted.median():.3f} m/s, max={valid_converted.max():.3f} m/s."
+                )
+
         try:
             feedback.setProgress(5)
         except Exception:
@@ -1179,7 +1331,9 @@ class SpatialDataFilteringAlgorithm(QgsProcessingAlgorithm):
             'filter_speed': self.parameterAsBool(parameters, self.FILTER_SPEED, context),
             'filter_accel': self.parameterAsBool(parameters, self.FILTER_ACCEL, context),
             'filter_dist_jump': self.parameterAsBool(parameters, self.FILTER_DIST_JUMP, context),
-            'speed_smooth_factor': self.parameterAsDouble(parameters, self.SPEED_SMOOTH_FACTOR, context)
+            'speed_smooth_factor': self.parameterAsDouble(parameters, self.SPEED_SMOOTH_FACTOR, context),
+            'manual_start_points': self.parameterAsInt(parameters, self.MANUAL_START_POINTS, context),
+            'manual_end_points': self.parameterAsInt(parameters, self.MANUAL_END_POINTS, context),
         }
         
         # Report Swath info
