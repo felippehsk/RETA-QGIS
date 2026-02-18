@@ -59,6 +59,28 @@ class DataCleaner:
         self._canceled = False
         self.verbose = verbose
         self.swath_width = None
+        self.error_masks = {
+            'Clean': 0,
+            # Operational
+            'Op: Turn': 1,
+            'Op: Short Segment': 2,
+            'Op: Distance Jump': 4,
+            'Op: Collocated': 8,
+            'Op: Start Delay': 16,
+            'Op: End Delay': 32,
+            'Op: Overlap': 64,
+            # Global
+            'Gl: Value Low': 128,
+            'Gl: Value High': 256,
+            # Local
+            'Lo: Spatial Outlier': 512,
+            # Limits
+            'Op: Min Speed': 1024,
+            'Op: Max Speed': 2048,
+            'Lo: Cross-Track Outlier': 4096,
+            'Op: High Acceleration': 8192,
+            'Op: Variable Speed Change': 16384
+        }
 
     def log(self, message):
         """Unified logging to console and QGIS feedback."""
@@ -66,30 +88,6 @@ class DataCleaner:
             print(message)
             if self._feedback:
                 self._feedback.pushInfo(message)
-
-        # Taxonomy
-        self.error_masks = {
-            'Clean': 0,
-            # Operational
-            'Op: Turn': 1,           
-            'Op: Short Segment': 2,
-            'Op: Distance Jump': 4,
-            'Op: Collocated': 8,
-            'Op: Start Delay': 16,
-            'Op: End Delay': 32,
-            'Op: Overlap': 64,       
-            # Global
-            'Gl: Value Low': 128,
-            'Gl: Value High': 256,
-            # Local
-            'Lo: Spatial Outlier': 512,
-            # Limits 
-            'Op: Min Speed': 1024,
-            'Op: Max Speed': 2048,
-            'Lo: Cross-Track Outlier': 4096,
-            'Op: High Acceleration': 8192,
-            'Op: Variable Speed Change': 16384 # Inspired by YE Smooth Velocity
-        }
 
     def calculate_geometry(self):
         # Excellence: strictly use pre-calculated _x_m and _y_m if they exist.
@@ -951,12 +949,13 @@ class SpatialDataFilteringAlgorithm(QgsProcessingAlgorithm):
     FILTER_SPEED = 'FILTER_SPEED'
     FILTER_ACCEL = 'FILTER_ACCEL'
     FILTER_DIST_JUMP = 'FILTER_DIST_JUMP'
+    REMOVE_FLAGGED = 'REMOVE_FLAGGED'
 
     OUTPUT = 'OUTPUT' 
     
     def createInstance(self): return SpatialDataFilteringAlgorithm()
     def name(self): return 'spatialdatafiltering'
-    def displayName(self): return 'Spatial Data Filtering (V8 Sequential)'
+    def displayName(self): return 'Spatial Data Filtering'
     def group(self): return 'RETA'
     def groupId(self): return 'reta'
 
@@ -1022,6 +1021,7 @@ class SpatialDataFilteringAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterBoolean(self.USE_CROSS_TRACK, 'Flag stripy transects (Cross-Track)', defaultValue=True))
         self.addParameter(QgsProcessingParameterBoolean(self.USE_CROSS_TRACK_CORRECT, 'Correct stripy transects (write corrected variable)', defaultValue=False))
         self.addParameter(QgsProcessingParameterBoolean(self.SIMPLE_ANNOTATION, 'Simple error categories (Clean, Local, Global, Operational Error only)', defaultValue=False))
+        self.addParameter(QgsProcessingParameterBoolean(self.REMOVE_FLAGGED, 'Remove flagged points from output', defaultValue=True))
         self.addParameter(QgsProcessingParameterFeatureSink(self.OUTPUT, 'Filtered Output'))
 
     def processAlgorithm(self, parameters, context, feedback):
@@ -1185,6 +1185,11 @@ class SpatialDataFilteringAlgorithm(QgsProcessingAlgorithm):
         except Exception:
             pass
         res = cleaner.get_cleaned_df()
+        remove_flagged = self.parameterAsBool(parameters, self.REMOVE_FLAGGED, context)
+        if remove_flagged:
+            n_before = len(res)
+            res = res[res['error_flag'] == 0].copy()
+            feedback.pushInfo(f"[Output] Removed {n_before - len(res)} flagged points. {len(res)} clean points remain.")
         use_cross_track_correct = self.parameterAsBool(parameters, self.USE_CROSS_TRACK_CORRECT, context)
         corrected_col = var_field + '_corrected' if use_cross_track_correct else None
         if corrected_col and corrected_col not in res.columns:

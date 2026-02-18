@@ -28,12 +28,13 @@ Agentic coding AI was used to develop this tool with human guidance and oversigh
 ## Installation
 
 1. Download or clone this repository.
-2. Copy the folder into your QGIS plugins directory:
+2. Copy the **`reta_qgis`** folder (not the entire repo) into your QGIS plugins directory:
    - **Windows:** `%APPDATA%/QGIS/QGIS3/profiles/default/python/plugins/`
    - **Linux:** `~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/`
    - **macOS:** `~/Library/Application Support/QGIS/QGIS3/profiles/default/python/plugins/`
 3. Restart QGIS and enable the plugin in **Plugins > Manage and Install Plugins**.
-4. The algorithm appears in the **Processing Toolbox** under **RETA > Spatial Data Filtering**.
+
+> **Note:** RETA is a Processing plugin. It does not add a toolbar button or menu entry. After enabling the plugin, find it in the **Processing Toolbox** panel (**Processing > Toolbox** or `Ctrl+Alt+T`) under **RETA > Spatial Data Filtering**.
 
 ### Dependencies
 
@@ -93,7 +94,6 @@ Each point receives a bitmask `error_flag` that encodes exactly which filters fl
 | `Op: Turn` | 1 | Operational | Point is in a turn/headland maneuver |
 | `Op: Short Segment` | 2 | Operational | Point is in a segment shorter than minimum length |
 | `Op: Distance Jump` | 4 | Operational | Distance to previous point exceeds 5x the median |
-| `Op: Collocated` | 8 | Operational | Co-located with another point |
 | `Op: Start Delay` | 16 | Operational | Sensor ramp-up at pass start |
 | `Op: End Delay` | 32 | Operational | Sensor ramp-down at pass end |
 | `Op: Overlap` | 64 | Operational | Overlapping with a previous pass |
@@ -278,7 +278,9 @@ Swath width is used to scale grid cells for overlap detection and local filterin
 
 ---
 
-## Output Fields
+## Output
+
+By default, the **Remove flagged points from output** option is enabled, so the output layer contains only clean (unflagged) points. Uncheck this option to retain all points with their error flags and categories for inspection.
 
 The output layer includes all original fields plus:
 
@@ -294,6 +296,7 @@ The output layer includes all original fields plus:
 | `error_reason` | String | Human-readable list of triggered filters |
 | `filtering_category` | String | Summary category (Clean / Operational Error / Global Outlier / Local Outlier) |
 | `Error Type` | String | Same as `filtering_category` |
+| `{variable}_corrected` | Double | Cross-track corrected values (only when correction is enabled) |
 
 ---
 
